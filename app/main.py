@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from aiogram import Bot, Dispatcher
+from aiogram.types import Update
 from fastapi import FastAPI, Request
 
 from app.bot.handlers import router
@@ -8,44 +9,110 @@ from app.config.settings import settings
 from app.database.database import init_db
 
 
+# ---------------------------------------------------------
+# Telegram Bot
+# ---------------------------------------------------------
+
 bot = Bot(token=settings.telegram_bot_token)
 
 dp = Dispatcher()
 dp.include_router(router)
 
 
+# ---------------------------------------------------------
+# Application Lifespan
+# ---------------------------------------------------------
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize database
-    await init_db()
+    print("🚀 Starting SAK AI...")
 
-    # Set Telegram webhook only when deployed
-    if settings.webhook_base_url:
-        webhook_url = (
-            f"{settings.webhook_base_url}/telegram/webhook"
-        )
+    # -----------------------------------------------------
+    # Initialize Database
+    # -----------------------------------------------------
+    try:
+        await init_db()
+        print("✅ Database initialized successfully!")
+    except Exception as e:
+        print(f"❌ Database initialization failed: {e}")
 
-        await bot.set_webhook(
-            url=webhook_url,
-            drop_pending_updates=True,
-        )
+    # -----------------------------------------------------
+    # Configure Telegram Webhook
+    # -----------------------------------------------------
+    try:
+        base_url = settings.webhook_base_url.strip().rstrip("/")
 
-        print(f"✅ Telegram webhook set: {webhook_url}")
+        if not base_url:
+            print("❌ WEBHOOK_BASE_URL is empty or not configured.")
+        else:
+            webhook_url = f"{base_url}/telegram/webhook"
 
+            print(f"🔧 Setting Telegram webhook...")
+            print(f"🔗 Webhook URL: {webhook_url}")
+
+            await bot.set_webhook(
+                url=webhook_url,
+                drop_pending_updates=True,
+            )
+
+            # Verify webhook with Telegram
+            webhook_info = await bot.get_webhook_info()
+
+            print("✅ Telegram webhook configured successfully!")
+            print(f"🔗 Registered URL: {webhook_info.url}")
+            print(
+                f"📨 Pending updates: "
+                f"{webhook_info.pending_update_count}"
+            )
+
+            if webhook_info.last_error_message:
+                print(
+                    f"⚠️ Telegram webhook last error: "
+                    f"{webhook_info.last_error_message}"
+                )
+
+    except Exception as e:
+        print(f"❌ Failed to configure Telegram webhook: {e}")
+
+    print("✅ SAK AI startup complete!")
+
+    # -----------------------------------------------------
+    # Application Running
+    # -----------------------------------------------------
     yield
 
-    # Cleanup
-    if settings.webhook_base_url:
-        await bot.delete_webhook()
+    # -----------------------------------------------------
+    # Shutdown
+    # -----------------------------------------------------
+    print("🛑 Shutting down SAK AI...")
 
+    # IMPORTANT:
+    # Do NOT delete the Telegram webhook here.
+    #
+    # Render may restart/redeploy the service and deleting
+    # the webhook during shutdown can cause Telegram updates
+    # to stop being delivered.
+    #
+    # We only close the bot HTTP session.
     await bot.session.close()
 
+    print("✅ SAK AI shutdown complete.")
+
+
+# ---------------------------------------------------------
+# FastAPI Application
+# ---------------------------------------------------------
 
 app = FastAPI(
     title="SAK AI API",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
+
+# ---------------------------------------------------------
+# Root Endpoint
+# ---------------------------------------------------------
 
 @app.get("/")
 async def root():
@@ -55,6 +122,10 @@ async def root():
     }
 
 
+# ---------------------------------------------------------
+# Health Check
+# ---------------------------------------------------------
+
 @app.get("/health")
 async def health():
     return {
@@ -63,13 +134,32 @@ async def health():
     }
 
 
+# ---------------------------------------------------------
+# Telegram Webhook
+# ---------------------------------------------------------
+
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
-    update_data = await request.json()
+    try:
+        update_data = await request.json()
 
-    await dp.feed_raw_update(
-        bot,
-        update_data,
-    )
+        # Convert incoming Telegram JSON into an aiogram Update
+        update = Update.model_validate(update_data)
 
-    return {"ok": True}
+        # Send update to aiogram dispatcher
+        await dp.feed_update(
+            bot,
+            update,
+        )
+
+        return {
+            "ok": True,
+        }
+
+    except Exception as e:
+        print(f"❌ Telegram webhook processing error: {e}")
+
+        return {
+            "ok": False,
+            "error": str(e),
+        }
