@@ -1,6 +1,6 @@
 from sqlalchemy import select
 
-from app.database.models import User , Lead
+from app.database.models import User , Lead ,   Update
 
 
 async def get_user(session, telegram_id: int):
@@ -57,3 +57,14 @@ async def create_lead(
     await session.refresh(lead)
 
     return lead    
+
+async def get_published_updates(session, limit: int = 5):
+    result = await session.execute(
+        select(Update)
+        .where(Update.is_published.is_(True))
+        .order_by(Update.created_at.desc())
+        .limit(limit)
+    )
+
+    return result.scalars().all()
+

@@ -6,7 +6,7 @@ from aiogram.types import Message
 from app.bot.keyboards import category_keyboard, main_menu_keyboard
 from app.bot.states import ContactStates, RegistrationStates
 from app.database.database import AsyncSessionLocal
-from app.database.repositories import  create_lead, get_user, get_user
+from app.database.repositories import  create_lead, get_user, get_user, get_published_updates
 from app.services.email_service import send_lead_email
 
 
@@ -127,17 +127,25 @@ async def category_handler(message: Message, state: FSMContext):
 @router.message(F.text == "🚀 About SAK AI")
 async def about_sak_ai_handler(message: Message):
     await message.answer(
-        "🤖 About SAK AI\n\n"
-        "SAK AI builds intelligent AI solutions, "
-        "automations, and AI agents.\n\n"
-        "🚀 What we do:\n"
-        "• 🤖 AI Solutions\n"
-        "• ⚡ Intelligent Automations\n"
-        "• 🧠 AI Agents\n"
-        "• 🔗 AI-powered Workflows & Integrations\n\n"
-        "Our goal is simple — use AI to automate repetitive "
-        "work, improve productivity, and solve real-world problems.\n\n"
-        "💡 SAK AI — AI • Automations • Agents"
+        "🚀 <b>About SAK AI</b>\n\n"
+        "<b>SAK AI — AI • Automations • Agents</b>\n\n"
+        "We build intelligent AI solutions that help businesses "
+        "automate repetitive work, connect their tools, and create "
+        "AI-powered workflows.\n\n"
+        
+        "<b>What we do</b>\n"
+        "🤖 AI Solutions\n"
+        "⚡ Intelligent Automations\n"
+        "🧠 AI Agents\n"
+        "🔗 AI Integrations\n\n"
+        
+        "Our goal is simple:\n"
+        "<b>Turn repetitive work into intelligent systems.</b>\n\n"
+        
+        "💡 Have an idea or business problem?\n"
+        "Let's discuss how AI can help.",
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(),
     )
 
 
@@ -216,6 +224,39 @@ async def contact_service_handler(
         "or solve."
     )
 
+@router.message(F.text == "📢 Updates")
+async def updates_handler(message: Message):
+    print("🧪 UPDATES HANDLER CALLED")
+
+    async with AsyncSessionLocal() as session:
+        updates = await get_published_updates(session)
+
+    print(f"🧪 UPDATES FOUND: {len(updates)}")
+
+    if not updates:
+        await message.answer(
+            "📢 <b>SAK AI Updates</b>\n\n"
+            "No new updates at the moment.\n\n"
+            "Stay tuned! 🚀",
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    response = "📢 <b>SAK AI Updates</b>\n\n"
+
+    for update in updates:
+        response += (
+            f"🚀 <b>{update.title}</b>\n"
+            f"{update.content}\n\n"
+            "━━━━━━━━━━━━━━\n\n"
+        )
+
+    await message.answer(
+        response,
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(),
+    )
 
 @router.message(ContactStates.waiting_for_requirement)
 async def contact_requirement_handler(

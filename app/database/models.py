@@ -93,3 +93,31 @@ class Lead(Base):
         DateTime(timezone=True),
         server_default=func.now(),
     )
+
+class Update(Base):
+    __tablename__ = "updates"
+
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    title: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    content: Mapped[str] = mapped_column(
+        String(4000),
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    is_published: Mapped[bool] = mapped_column(
+        default=True,
+        nullable=False,
+    )    
