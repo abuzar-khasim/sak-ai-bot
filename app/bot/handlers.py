@@ -1,24 +1,42 @@
 from aiogram import F, Router
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from app.bot.keyboards import category_keyboard, main_menu_keyboard
 from app.bot.states import ContactStates, RegistrationStates
 from app.database.database import AsyncSessionLocal
-from app.database.repositories import  create_lead, get_user, get_user, get_published_updates
+from app.database.repositories import (
+    create_lead,
+    create_user,
+    get_published_updates,
+    get_user,
+)
 from app.services.email_service import send_lead_email
 
 
 router = Router()
 
 
+# ============================================================
+# START / REGISTRATION
+# ============================================================
+
 @router.message(CommandStart())
-async def start_handler(message: Message, state: FSMContext):
+async def start_handler(
+    message: Message,
+    state: FSMContext,
+):
     telegram_id = message.from_user.id
 
+    # /start should always reset any previous FSM flow
+    await state.clear()
+
     async with AsyncSessionLocal() as session:
-        existing_user = await get_user(session, telegram_id)
+        existing_user = await get_user(
+            session,
+            telegram_id,
+        )
 
     if existing_user:
         await message.answer(
@@ -28,7 +46,9 @@ async def start_handler(message: Message, state: FSMContext):
         )
         return
 
-    await state.set_state(RegistrationStates.waiting_for_name)
+    await state.set_state(
+        RegistrationStates.waiting_for_name
+    )
 
     await message.answer(
         "👋 Welcome to SAK AI!\n\n"
@@ -40,15 +60,25 @@ async def start_handler(message: Message, state: FSMContext):
 
 
 @router.message(RegistrationStates.waiting_for_name)
-async def name_handler(message: Message, state: FSMContext):
+async def name_handler(
+    message: Message,
+    state: FSMContext,
+):
     name = (message.text or "").strip()
 
     if len(name) < 2:
-        await message.answer("Please enter a valid name.")
+        await message.answer(
+            "Please enter a valid name."
+        )
         return
 
-    await state.update_data(name=name)
-    await state.set_state(RegistrationStates.waiting_for_age)
+    await state.update_data(
+        name=name
+    )
+
+    await state.set_state(
+        RegistrationStates.waiting_for_age
+    )
 
     await message.answer(
         "Nice to meet you! 👋\n\n"
@@ -57,7 +87,10 @@ async def name_handler(message: Message, state: FSMContext):
 
 
 @router.message(RegistrationStates.waiting_for_age)
-async def age_handler(message: Message, state: FSMContext):
+async def age_handler(
+    message: Message,
+    state: FSMContext,
+):
     try:
         age = int((message.text or "").strip())
     except ValueError:
@@ -68,11 +101,18 @@ async def age_handler(message: Message, state: FSMContext):
         return
 
     if age < 5 or age > 120:
-        await message.answer("Please enter a valid age.")
+        await message.answer(
+            "Please enter a valid age."
+        )
         return
 
-    await state.update_data(age=age)
-    await state.set_state(RegistrationStates.waiting_for_category)
+    await state.update_data(
+        age=age
+    )
+
+    await state.set_state(
+        RegistrationStates.waiting_for_category
+    )
 
     await message.answer(
         "Which category describes you best?",
@@ -81,7 +121,10 @@ async def age_handler(message: Message, state: FSMContext):
 
 
 @router.message(RegistrationStates.waiting_for_category)
-async def category_handler(message: Message, state: FSMContext):
+async def category_handler(
+    message: Message,
+    state: FSMContext,
+):
     category = (message.text or "").strip()
 
     allowed_categories = {
@@ -124,24 +167,37 @@ async def category_handler(message: Message, state: FSMContext):
     )
 
 
-@router.message(F.text == "🚀 About SAK AI")
-async def about_sak_ai_handler(message: Message):
+# ============================================================
+# MAIN MENU
+# ============================================================
+
+@router.message(
+    StateFilter("*"),
+    F.text == "🚀 About SAK AI",
+)
+async def about_sak_ai_handler(
+    message: Message,
+    state: FSMContext,
+):
+    # Cancel any active FSM flow
+    await state.clear()
+
     await message.answer(
         "🚀 <b>About SAK AI</b>\n\n"
         "<b>SAK AI — AI • Automations • Agents</b>\n\n"
         "We build intelligent AI solutions that help businesses "
         "automate repetitive work, connect their tools, and create "
         "AI-powered workflows.\n\n"
-        
+
         "<b>What we do</b>\n"
         "🤖 AI Solutions\n"
         "⚡ Intelligent Automations\n"
         "🧠 AI Agents\n"
         "🔗 AI Integrations\n\n"
-        
+
         "Our goal is simple:\n"
         "<b>Turn repetitive work into intelligent systems.</b>\n\n"
-        
+
         "💡 Have an idea or business problem?\n"
         "Let's discuss how AI can help.",
         parse_mode="HTML",
@@ -149,11 +205,17 @@ async def about_sak_ai_handler(message: Message):
     )
 
 
-@router.message(F.text == "📩 Contact Us")
+@router.message(
+    StateFilter("*"),
+    F.text == "📩 Contact Us",
+)
 async def contact_us_handler(
     message: Message,
     state: FSMContext,
 ):
+    # Cancel any previous FSM flow first
+    await state.clear()
+
     await state.set_state(
         ContactStates.waiting_for_email
     )
@@ -165,7 +227,76 @@ async def contact_us_handler(
     )
 
 
-@router.message(ContactStates.waiting_for_email)
+@router.message(
+    StateFilter("*"),
+    F.text == "📢 Updates",
+)
+async def updates_handler(
+    message: Message,
+    state: FSMContext,
+):
+    # Cancel any active FSM flow
+    await state.clear()
+
+    async with AsyncSessionLocal() as session:
+        updates = await get_published_updates(
+            session
+        )
+
+    if not updates:
+        await message.answer(
+            "📢 <b>SAK AI Updates</b>\n\n"
+            "No new updates at the moment.\n\n"
+            "Stay tuned! 🚀",
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    response = "📢 <b>SAK AI Updates</b>\n\n"
+
+    for update in updates:
+        response += (
+            f"🚀 <b>{update.title}</b>\n"
+            f"{update.content}\n\n"
+            "━━━━━━━━━━━━━━\n\n"
+        )
+
+    await message.answer(
+        response,
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(),
+    )
+
+
+@router.message(
+    StateFilter("*"),
+    F.text == "🔎 Ask SAK AI",
+)
+async def ask_sak_ai_handler(
+    message: Message,
+    state: FSMContext,
+):
+    # Cancel any active FSM flow
+    await state.clear()
+
+    await message.answer(
+        "🔎 <b>Ask SAK AI</b>\n\n"
+        "Our AI assistant is coming soon. 🤖\n\n"
+        "You'll be able to ask questions, get information, "
+        "and interact with intelligent AI agents.",
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(),
+    )
+
+
+# ============================================================
+# CONTACT US — EMAIL
+# ============================================================
+
+@router.message(
+    ContactStates.waiting_for_email
+)
 async def contact_email_handler(
     message: Message,
     state: FSMContext,
@@ -197,7 +328,13 @@ async def contact_email_handler(
     )
 
 
-@router.message(ContactStates.waiting_for_service)
+# ============================================================
+# CONTACT US — SERVICE
+# ============================================================
+
+@router.message(
+    ContactStates.waiting_for_service
+)
 async def contact_service_handler(
     message: Message,
     state: FSMContext,
@@ -224,41 +361,14 @@ async def contact_service_handler(
         "or solve."
     )
 
-@router.message(F.text == "📢 Updates")
-async def updates_handler(message: Message):
-    print("🧪 UPDATES HANDLER CALLED")
 
-    async with AsyncSessionLocal() as session:
-        updates = await get_published_updates(session)
+# ============================================================
+# CONTACT US — REQUIREMENT
+# ============================================================
 
-    print(f"🧪 UPDATES FOUND: {len(updates)}")
-
-    if not updates:
-        await message.answer(
-            "📢 <b>SAK AI Updates</b>\n\n"
-            "No new updates at the moment.\n\n"
-            "Stay tuned! 🚀",
-            parse_mode="HTML",
-            reply_markup=main_menu_keyboard(),
-        )
-        return
-
-    response = "📢 <b>SAK AI Updates</b>\n\n"
-
-    for update in updates:
-        response += (
-            f"🚀 <b>{update.title}</b>\n"
-            f"{update.content}\n\n"
-            "━━━━━━━━━━━━━━\n\n"
-        )
-
-    await message.answer(
-        response,
-        parse_mode="HTML",
-        reply_markup=main_menu_keyboard(),
-    )
-
-@router.message(ContactStates.waiting_for_requirement)
+@router.message(
+    ContactStates.waiting_for_requirement
+)
 async def contact_requirement_handler(
     message: Message,
     state: FSMContext,
@@ -274,11 +384,13 @@ async def contact_requirement_handler(
 
     if len(requirement) < 5:
         await message.answer(
-            "Please provide a little more detail about your requirement."
+            "Please provide a little more detail "
+            "about your requirement."
         )
         return
 
     data = await state.get_data()
+
     telegram_id = message.from_user.id
 
     async with AsyncSessionLocal() as session:
@@ -316,11 +428,14 @@ async def contact_requirement_handler(
         )
 
         print(
-            f"✅ Lead email sent successfully for lead #{lead.id}"
+            f"✅ Lead email sent successfully "
+            f"for lead #{lead.id}"
         )
 
     except Exception as e:
-        print(f"❌ Failed to send lead email: {e}")
+        print(
+            f"❌ Failed to send lead email: {e}"
+        )
 
     await message.answer(
         "✅ Requirement submitted successfully!\n\n"
