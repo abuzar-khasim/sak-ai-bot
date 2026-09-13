@@ -7,7 +7,7 @@ from app.bot.keyboards import category_keyboard, main_menu_keyboard
 from app.bot.states import ContactStates, RegistrationStates
 from app.database.database import AsyncSessionLocal
 from app.database.repositories import  create_user, get_user, get_user
-from app.services.email_services import send_lead_email
+from app.services.email_service import send_lead_email
 
 
 router = Router()
