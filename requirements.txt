@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+aiogram
+sqlalchemy
+asyncpg
+greenlet
+pydantic-settings
+python-dotenv
+email-validator
