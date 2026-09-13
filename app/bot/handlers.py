@@ -223,6 +223,12 @@ async def contact_requirement_handler(
     state: FSMContext,
 ):
     requirement = (message.text or "").strip()
+    print(
+    f"🧪 REQUIREMENT DEBUG: "
+    f"text={message.text!r}, "
+    f"length={len(requirement)}, "
+    f"state={await state.get_state()}"
+)
 
     if len(requirement) < 5:
         await message.answer(
