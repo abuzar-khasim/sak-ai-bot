@@ -1,6 +1,6 @@
 from sqlalchemy import select
 
-from app.database.models import User
+from app.database.models import User , Lead
 
 
 async def get_user(session, telegram_id: int):
@@ -33,3 +33,27 @@ async def create_user(
     await session.refresh(user)
 
     return user
+
+
+async def create_lead(
+    session,
+    telegram_id: int,
+    name: str,
+    email: str,
+    service: str,
+    requirement: str,
+):
+    lead = Lead(
+        telegram_id=telegram_id,
+        name=name,
+        email=email,
+        service=service,
+        requirement=requirement,
+    )
+
+    session.add(lead)
+
+    await session.commit()
+    await session.refresh(lead)
+
+    return lead    

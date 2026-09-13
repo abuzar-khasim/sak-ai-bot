@@ -7,6 +7,10 @@ class Settings(BaseSettings):
     admin_telegram_id: int
     webhook_base_url: str = ""
 
+    admin_email: str
+    smtp_email: str
+    smtp_app_password: str
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

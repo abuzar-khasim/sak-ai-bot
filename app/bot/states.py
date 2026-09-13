@@ -5,3 +5,8 @@ class RegistrationStates(StatesGroup):
     waiting_for_name = State()
     waiting_for_age = State()
     waiting_for_category = State()
+
+class ContactStates(StatesGroup):
+    waiting_for_email = State()
+    waiting_for_service = State()
+    waiting_for_requirement = State()
