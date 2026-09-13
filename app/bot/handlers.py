@@ -6,7 +6,7 @@ from aiogram.types import Message
 from app.bot.keyboards import category_keyboard, main_menu_keyboard
 from app.bot.states import ContactStates, RegistrationStates
 from app.database.database import AsyncSessionLocal
-from app.database.repositories import  create_user, get_user, get_user
+from app.database.repositories import  create_lead, get_user, get_user
 from app.services.email_service import send_lead_email
 
 
@@ -223,12 +223,13 @@ async def contact_requirement_handler(
     state: FSMContext,
 ):
     requirement = (message.text or "").strip()
+
     print(
-    f"🧪 REQUIREMENT DEBUG: "
-    f"text={message.text!r}, "
-    f"length={len(requirement)}, "
-    f"state={await state.get_state()}"
-)
+        f"🧪 REQUIREMENT DEBUG: "
+        f"text={message.text!r}, "
+        f"length={len(requirement)}, "
+        f"state={await state.get_state()}"
+    )
 
     if len(requirement) < 5:
         await message.answer(
@@ -237,7 +238,6 @@ async def contact_requirement_handler(
         return
 
     data = await state.get_data()
-
     telegram_id = message.from_user.id
 
     async with AsyncSessionLocal() as session:
@@ -264,7 +264,7 @@ async def contact_requirement_handler(
             requirement=requirement,
         )
 
-        await state.clear()
+    await state.clear()
 
     try:
         await send_lead_email(
@@ -273,9 +273,19 @@ async def contact_requirement_handler(
             service=data["service"],
             requirement=requirement,
         )
+
+        print(
+            f"✅ Lead email sent successfully for lead #{lead.id}"
+        )
+
     except Exception as e:
         print(f"❌ Failed to send lead email: {e}")
 
     await message.answer(
         "✅ Requirement submitted successfully!\n\n"
+        f"Reference ID: #{lead.id}\n\n"
+        "Our team will review your requirement and "
+        "get back to you.\n\n"
+        "Thank you for choosing SAK AI. 🤖",
+        reply_markup=main_menu_keyboard(),
     )
