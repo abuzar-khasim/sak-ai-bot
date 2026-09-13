@@ -7,4 +7,4 @@ greenlet
 pydantic-settings
 python-dotenv
 email-validator
-resend
+resend[async]
