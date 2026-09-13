@@ -1,46 +1,6 @@
-import asyncio
-import smtplib
-from email.message import EmailMessage
+import resend
 
 from app.config.settings import settings
-
-
-def _send_email_sync(
-    name: str,
-    email: str,
-    service: str,
-    requirement: str,
-):
-    message = EmailMessage()
-
-    message["Subject"] = f"🚀 New SAK AI Lead — {service}"
-    message["From"] = settings.smtp_email
-    message["To"] = settings.admin_email
-    message["Reply-To"] = email
-
-    message.set_content(
-        f"""New Contact Us submission from SAK AI
-
-Name: {name}
-Email: {email}
-Service: {service}
-
-Requirement:
-{requirement}
-
----
-SAK AI
-AI • Automations • Agents
-"""
-    )
-
-    with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
-        smtp.starttls()
-        smtp.login(
-            settings.smtp_email,
-            settings.smtp_app_password,
-        )
-        smtp.send_message(message)
 
 
 async def send_lead_email(
@@ -49,10 +9,33 @@ async def send_lead_email(
     service: str,
     requirement: str,
 ):
-    await asyncio.to_thread(
-        _send_email_sync,
-        name,
-        email,
-        service,
-        requirement,
-    )
+    resend.api_key = settings.resend_api_key
+
+    params = {
+        "from": "SAK AI <onboarding@resend.dev>",
+        "to": [settings.admin_email],
+        "subject": f"🚀 New SAK AI Lead — {service}",
+        "html": f"""
+        <h2>New SAK AI Lead</h2>
+
+        <p><strong>Name:</strong> {name}</p>
+        <p><strong>Email:</strong> {email}</p>
+        <p><strong>Service:</strong> {service}</p>
+
+        <h3>Requirement</h3>
+        <p>{requirement}</p>
+
+        <hr>
+
+        <p>
+            <strong>SAK AI</strong><br>
+            AI • Automations • Agents
+        </p>
+        """,
+    }
+
+    result = await resend.Emails.send_async(params)
+
+    print(f"✅ Email sent successfully: {result}")
+
+    return result

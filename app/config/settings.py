@@ -8,8 +8,8 @@ class Settings(BaseSettings):
     webhook_base_url: str = ""
 
     admin_email: str
-    smtp_email: str
-    smtp_app_password: str
+    resend_api_key: str
+    
 
     model_config = SettingsConfigDict(
         env_file=".env",
