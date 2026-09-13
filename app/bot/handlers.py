@@ -1,21 +1,43 @@
 from aiogram import F, Router
-from aiogram.filters import CommandStart, StateFilter
+from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from app.bot.keyboards import category_keyboard, main_menu_keyboard
-from app.bot.states import ContactStates, RegistrationStates
+from app.config.settings import settings
+
+from app.bot.keyboards import (
+    admin_keyboard,
+    category_keyboard,
+    main_menu_keyboard,
+)
+
+from app.bot.states import (
+    AdminStates,
+    ContactStates,
+    RegistrationStates,
+)
+
 from app.database.database import AsyncSessionLocal
+from app.database.models import Update
 from app.database.repositories import (
     create_lead,
     create_user,
     get_published_updates,
     get_user,
 )
+
 from app.services.email_service import send_lead_email
 
 
 router = Router()
+
+
+# ============================================================
+# ADMIN AUTHORIZATION
+# ============================================================
+
+def is_admin(telegram_id: int) -> bool:
+    return telegram_id == settings.admin_telegram_id
 
 
 # ============================================================
@@ -29,7 +51,7 @@ async def start_handler(
 ):
     telegram_id = message.from_user.id
 
-    # /start should always reset any previous FSM flow
+    # /start always resets any active FSM flow
     await state.clear()
 
     async with AsyncSessionLocal() as session:
@@ -168,7 +190,209 @@ async def category_handler(
 
 
 # ============================================================
-# MAIN MENU
+# ADMIN PANEL
+# ============================================================
+
+@router.message(
+    StateFilter("*"),
+    Command("admin"),
+)
+async def admin_panel_handler(
+    message: Message,
+    state: FSMContext,
+):
+    await state.clear()
+
+    telegram_id = message.from_user.id
+
+    if not is_admin(telegram_id):
+        await message.answer(
+            "⛔ You are not authorized to access the admin panel.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    await message.answer(
+        "🔐 <b>SAK AI Admin Panel</b>\n\n"
+        "Welcome, Admin.\n\n"
+        "Choose an action:",
+        parse_mode="HTML",
+        reply_markup=admin_keyboard(),
+    )
+
+
+# ============================================================
+# ADMIN — ADD UPDATE
+# ============================================================
+
+@router.message(
+    StateFilter("*"),
+    F.text == "➕ Add Update",
+)
+async def admin_add_update_handler(
+    message: Message,
+    state: FSMContext,
+):
+    telegram_id = message.from_user.id
+
+    if not is_admin(telegram_id):
+        await state.clear()
+
+        await message.answer(
+            "⛔ You are not authorized to access the admin panel.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    await state.clear()
+
+    await state.set_state(
+        AdminStates.waiting_for_update_title
+    )
+
+    await message.answer(
+        "➕ <b>Add New Update</b>\n\n"
+        "Please enter the update title:",
+        parse_mode="HTML",
+    )
+
+
+@router.message(
+    AdminStates.waiting_for_update_title
+)
+async def admin_update_title_handler(
+    message: Message,
+    state: FSMContext,
+):
+    if not is_admin(message.from_user.id):
+        await state.clear()
+
+        await message.answer(
+            "⛔ You are not authorized.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    title = (message.text or "").strip()
+
+    if len(title) < 2:
+        await message.answer(
+            "Please enter a valid update title."
+        )
+        return
+
+    if len(title) > 255:
+        await message.answer(
+            "The update title is too long.\n\n"
+            "Please keep it under 255 characters."
+        )
+        return
+
+    await state.update_data(
+        update_title=title
+    )
+
+    await state.set_state(
+        AdminStates.waiting_for_update_content
+    )
+
+    await message.answer(
+        "📝 Now enter the update content.\n\n"
+        "This is the message users will see "
+        "when they open 📢 Updates."
+    )
+
+
+@router.message(
+    AdminStates.waiting_for_update_content
+)
+async def admin_update_content_handler(
+    message: Message,
+    state: FSMContext,
+):
+    if not is_admin(message.from_user.id):
+        await state.clear()
+
+        await message.answer(
+            "⛔ You are not authorized.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    content = (message.text or "").strip()
+
+    if len(content) < 2:
+        await message.answer(
+            "Please enter some content for the update."
+        )
+        return
+
+    if len(content) > 4000:
+        await message.answer(
+            "The update content is too long.\n\n"
+            "Please keep it under 4000 characters."
+        )
+        return
+
+    data = await state.get_data()
+
+    title = data.get("update_title")
+
+    if not title:
+        await state.clear()
+
+        await message.answer(
+            "Something went wrong with the update flow.\n\n"
+            "Please start again with /admin."
+        )
+        return
+
+    async with AsyncSessionLocal() as session:
+        update = Update(
+            title=title,
+            content=content,
+            is_published=True,
+        )
+
+        session.add(update)
+
+        await session.commit()
+        await session.refresh(update)
+
+    await state.clear()
+
+    await message.answer(
+        "✅ <b>Update published successfully!</b>\n\n"
+        f"🚀 <b>{update.title}</b>\n\n"
+        f"{update.content}\n\n"
+        f"Update ID: #{update.id}",
+        parse_mode="HTML",
+        reply_markup=admin_keyboard(),
+    )
+
+
+# ============================================================
+# ADMIN — MAIN MENU
+# ============================================================
+
+@router.message(
+    StateFilter("*"),
+    F.text == "🔙 Main Menu",
+)
+async def admin_main_menu_handler(
+    message: Message,
+    state: FSMContext,
+):
+    await state.clear()
+
+    await message.answer(
+        "🏠 Main Menu",
+        reply_markup=main_menu_keyboard(),
+    )
+
+
+# ============================================================
+# MAIN MENU — ABOUT
 # ============================================================
 
 @router.message(
@@ -179,7 +403,6 @@ async def about_sak_ai_handler(
     message: Message,
     state: FSMContext,
 ):
-    # Cancel any active FSM flow
     await state.clear()
 
     await message.answer(
@@ -205,6 +428,10 @@ async def about_sak_ai_handler(
     )
 
 
+# ============================================================
+# MAIN MENU — CONTACT US
+# ============================================================
+
 @router.message(
     StateFilter("*"),
     F.text == "📩 Contact Us",
@@ -213,7 +440,6 @@ async def contact_us_handler(
     message: Message,
     state: FSMContext,
 ):
-    # Cancel any previous FSM flow first
     await state.clear()
 
     await state.set_state(
@@ -227,6 +453,10 @@ async def contact_us_handler(
     )
 
 
+# ============================================================
+# MAIN MENU — UPDATES
+# ============================================================
+
 @router.message(
     StateFilter("*"),
     F.text == "📢 Updates",
@@ -235,7 +465,6 @@ async def updates_handler(
     message: Message,
     state: FSMContext,
 ):
-    # Cancel any active FSM flow
     await state.clear()
 
     async with AsyncSessionLocal() as session:
@@ -269,6 +498,10 @@ async def updates_handler(
     )
 
 
+# ============================================================
+# MAIN MENU — ASK SAK AI
+# ============================================================
+
 @router.message(
     StateFilter("*"),
     F.text == "🔎 Ask SAK AI",
@@ -277,7 +510,6 @@ async def ask_sak_ai_handler(
     message: Message,
     state: FSMContext,
 ):
-    # Cancel any active FSM flow
     await state.clear()
 
     await message.answer(

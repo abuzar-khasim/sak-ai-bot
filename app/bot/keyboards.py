@@ -35,3 +35,17 @@ def main_menu_keyboard():
         ],
         resize_keyboard=True,
     )
+
+def admin_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text="➕ Add Update"),
+                KeyboardButton(text="📋 Manage Updates"),
+            ],
+            [
+                KeyboardButton(text="🔙 Main Menu"),
+            ],
+        ],
+        resize_keyboard=True,
+    )    
