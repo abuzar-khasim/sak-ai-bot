@@ -5,6 +5,9 @@ from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
+from app.ai.intents import AIIntent, detect_intent
+from app.ai.router import LLMRouter
+from app.ai.service import AIService
 from app.config.settings import settings
 
 from app.bot.keyboards import (
@@ -16,6 +19,7 @@ from app.bot.keyboards import (
 
 from app.bot.states import (
     AdminStates,
+    AIStates,
     ContactStates,
     RegistrationStates,
 )
@@ -36,6 +40,55 @@ from app.services.email_service import send_lead_email
 
 
 router = Router()
+
+
+# ============================================================
+# REUSABLE — SEND UPDATES
+# ============================================================
+
+async def send_updates(
+    message: Message,
+) -> None:
+    """Send published SAK AI updates to the user."""
+
+    async with AsyncSessionLocal() as session:
+        updates = await get_published_updates(
+            session=session,
+            limit=5,
+        )
+
+    if not updates:
+        await message.answer(
+            "📢 <b>SAK AI Updates</b>\n\n"
+            "No new updates at the moment.\n\n"
+            "Stay tuned! 🚀",
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    lines = [
+        "📢 <b>SAK AI Updates</b>",
+        "",
+    ]
+
+    for update in updates:
+        safe_title = html.escape(update.title)
+        safe_content = html.escape(update.content)
+
+        lines.append(
+            f"🚀 <b>{safe_title}</b>"
+        )
+        lines.append(safe_content)
+        lines.append("")
+        lines.append("━━━━━━━━━━━━━━")
+        lines.append("")
+
+    await message.answer(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(),
+    )
 
 
 # ============================================================
@@ -250,7 +303,10 @@ async def admin_manage_updates_handler(
     await state.clear()
 
     async with AsyncSessionLocal() as session:
-        updates = await get_all_updates(session, limit=10)
+        updates = await get_all_updates(
+            session,
+            limit=10,
+        )
 
     if not updates:
         await message.answer(
@@ -267,7 +323,6 @@ async def admin_manage_updates_handler(
         safe_title = html.escape(update.title)
         safe_content = html.escape(update.content)
 
-        # Keep the management message compact.
         if len(safe_content) > 300:
             safe_content = safe_content[:300] + "..."
 
@@ -381,13 +436,6 @@ async def admin_main_menu_handler(
 ):
     await state.clear()
 
-    if is_admin(message.from_user.id):
-        await message.answer(
-            "🏠 Main Menu",
-            reply_markup=main_menu_keyboard(),
-        )
-        return
-
     await message.answer(
         "🏠 Main Menu",
         reply_markup=main_menu_keyboard(),
@@ -470,39 +518,7 @@ async def updates_handler(
 ):
     await state.clear()
 
-    async with AsyncSessionLocal() as session:
-        updates = await get_published_updates(
-            session,
-            limit=5,
-        )
-
-    if not updates:
-        await message.answer(
-            "📢 <b>SAK AI Updates</b>\n\n"
-            "No new updates at the moment.\n\n"
-            "Stay tuned! 🚀",
-            parse_mode="HTML",
-            reply_markup=main_menu_keyboard(),
-        )
-        return
-
-    response = "📢 <b>SAK AI Updates</b>\n\n"
-
-    for update in updates:
-        safe_title = html.escape(update.title)
-        safe_content = html.escape(update.content)
-
-        response += (
-            f"🚀 <b>{safe_title}</b>\n"
-            f"{safe_content}\n\n"
-            "━━━━━━━━━━━━━━\n\n"
-        )
-
-    await message.answer(
-        response,
-        parse_mode="HTML",
-        reply_markup=main_menu_keyboard(),
-    )
+    await send_updates(message)
 
 
 # ============================================================
@@ -519,14 +535,150 @@ async def ask_sak_ai_handler(
 ):
     await state.clear()
 
+    await state.set_state(
+        AIStates.chatting
+    )
+
     await message.answer(
-        "🔎 <b>Ask SAK AI</b>\n\n"
-        "Our AI assistant is coming soon. 🤖\n\n"
-        "You'll be able to ask questions, get information, "
-        "and interact with intelligent AI agents.",
+        "🔎 <b>SAK AI Assistant</b>\n\n"
+        "I'm ready. 🤖\n\n"
+        "Ask me anything about AI, automations, "
+        "AI agents, workflows, or SAK AI.\n\n"
+        "Just type your question below.",
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(),
     )
+
+
+# ============================================================
+# AI CHAT
+# ============================================================
+
+@router.message(
+    AIStates.chatting,
+    F.text,
+)
+async def ai_chat_handler(
+    message: Message,
+    state: FSMContext,
+    llm_router: LLMRouter,
+):
+    user_message = (message.text or "").strip()
+
+    if not user_message:
+        return
+
+    # ---------------------------------------------------------
+    # Input length protection
+    # ---------------------------------------------------------
+
+    if len(user_message) > 10000:
+        await message.answer(
+            "Your message is too long.\n\n"
+            "Please keep it under 10,000 characters.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    # ---------------------------------------------------------
+    # Detect Telegram navigation intent
+    # ---------------------------------------------------------
+
+    intent = detect_intent(user_message)
+
+    # ---------------------------------------------------------
+    # CONTACT US
+    # ---------------------------------------------------------
+
+    if intent == AIIntent.CONTACT_US:
+        await state.clear()
+
+        await state.set_state(
+            ContactStates.waiting_for_email
+        )
+
+        await message.answer(
+            "📩 <b>Contact SAK AI</b>\n\n"
+            "Sure! Let's understand how we can help you.\n\n"
+            "Please enter your email address:",
+            parse_mode="HTML",
+        )
+
+        return
+
+    # ---------------------------------------------------------
+    # UPDATES
+    # ---------------------------------------------------------
+
+    if intent == AIIntent.UPDATES:
+        await state.clear()
+
+        await send_updates(message)
+
+        return
+
+    # ---------------------------------------------------------
+    # ASK AI
+    # ---------------------------------------------------------
+
+    if intent == AIIntent.ASK_AI:
+        await message.answer(
+            "Sure! 🔎\n\n"
+            "You're already talking to SAK AI. "
+            "Send me your question."
+        )
+
+        return
+
+    # ---------------------------------------------------------
+    # NORMAL AI QUESTION
+    # ---------------------------------------------------------
+
+    telegram_id = message.from_user.id
+
+    ai_service = AIService(llm_router)
+
+    try:
+        await message.bot.send_chat_action(
+            chat_id=message.chat.id,
+            action="typing",
+        )
+
+        async with AsyncSessionLocal() as session:
+            response, model = await ai_service.generate_response(
+                session=session,
+                telegram_id=telegram_id,
+                user_message=user_message,
+            )
+
+        await message.answer(
+            response,
+            reply_markup=main_menu_keyboard(),
+        )
+
+        print(
+            f"✅ AI response generated using {model}"
+        )
+
+    except ValueError as e:
+        # Input guardrail rejection
+        await message.answer(
+            str(e),
+            reply_markup=main_menu_keyboard(),
+        )
+
+    except Exception as e:
+        print(
+            f"❌ AI generation failed: "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await message.answer(
+            "⚠️ I'm having trouble processing your request "
+            "right now.\n\n"
+            "Please try again in a moment.",
+            reply_markup=main_menu_keyboard(),
+        )
 
 
 # ============================================================

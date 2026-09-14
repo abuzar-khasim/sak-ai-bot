@@ -1,6 +1,6 @@
 from sqlalchemy import select
 
-from app.database.models import User , Lead ,   Update
+from app.database.models import User , Lead , Update, Conversation, Message
 
 
 async def get_user(session, telegram_id: int):
@@ -90,3 +90,69 @@ async def delete_update(session, update_id: int):
     await session.commit()
 
     return True
+
+
+async def get_or_create_conversation(
+    session,
+    telegram_id: int,
+):
+    result = await session.execute(
+        select(Conversation)
+        .where(Conversation.telegram_id == telegram_id)
+        .order_by(Conversation.updated_at.desc())
+        .limit(1)
+    )
+
+    conversation = result.scalar_one_or_none()
+
+    if conversation is not None:
+        return conversation
+
+    conversation = Conversation(
+        telegram_id=telegram_id,
+        title="New Conversation",
+    )
+
+    session.add(conversation)
+    await session.commit()
+    await session.refresh(conversation)
+
+    return conversation
+
+
+async def create_message(
+    session,
+    conversation_id: int,
+    role: str,
+    content: str,
+    model: str | None = None,
+):
+    message = Message(
+        conversation_id=conversation_id,
+        role=role,
+        content=content,
+        model=model,
+    )
+
+    session.add(message)
+    await session.commit()
+    await session.refresh(message)
+
+    return message
+
+
+async def get_recent_messages(
+    session,
+    conversation_id: int,
+    limit: int = 20,
+):
+    result = await session.execute(
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.desc())
+        .limit(limit)
+    )
+
+    messages = result.scalars().all()
+
+    return list(reversed(messages))

@@ -4,6 +4,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import Update
 from fastapi import FastAPI, Request
 
+from app.ai.http_client import create_http_client
+from app.ai.router import LLMRouter
 from app.bot.handlers import router
 from app.config.settings import settings
 from app.database.database import init_db
@@ -37,6 +39,18 @@ async def lifespan(app: FastAPI):
         print(f"❌ Database initialization failed: {e}")
 
     # -----------------------------------------------------
+    # Initialize AI HTTP Client + LLM Router
+    # -----------------------------------------------------
+    http_client = create_http_client()
+    llm_router = LLMRouter(http_client)
+
+    app.state.http_client = http_client
+    app.state.llm_router = llm_router
+
+    print("✅ AI HTTP client initialized")
+    print("✅ LLM router initialized")
+
+    # -----------------------------------------------------
     # Configure Telegram Webhook
     # -----------------------------------------------------
     try:
@@ -47,7 +61,7 @@ async def lifespan(app: FastAPI):
         else:
             webhook_url = f"{base_url}/telegram/webhook"
 
-            print(f"🔧 Setting Telegram webhook...")
+            print("🔧 Setting Telegram webhook...")
             print(f"🔗 Webhook URL: {webhook_url}")
 
             await bot.set_webhook(
@@ -85,6 +99,10 @@ async def lifespan(app: FastAPI):
     # Shutdown
     # -----------------------------------------------------
     print("🛑 Shutting down SAK AI...")
+
+    # Close shared AI HTTP client
+    await http_client.aclose()
+    print("✅ AI HTTP client closed")
 
     # IMPORTANT:
     # Do NOT delete the Telegram webhook here.

@@ -120,4 +120,74 @@ class Update(Base):
     is_published: Mapped[bool] = mapped_column(
         default=True,
         nullable=False,
-    )    
+    )
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    telegram_id: Mapped[int] = mapped_column(
+        BigInteger,
+        index=True,
+        nullable=False,
+    )
+
+    title: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    summary: Mapped[str | None] = mapped_column(
+        String(8000),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    conversation_id: Mapped[int] = mapped_column(
+        BigInteger,
+        index=True,
+        nullable=False,
+    )
+
+    role: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+
+    content: Mapped[str] = mapped_column(
+        String(20000),
+        nullable=False,
+    )
+
+    model: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
