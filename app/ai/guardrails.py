@@ -1,50 +1,66 @@
 import re
 
 
-# ---------------------------------------------------------
-# Limits
-# ---------------------------------------------------------
+# ============================================================
+# LIMITS
+# ============================================================
 
 MAX_INPUT_LENGTH = 10_000
 MAX_OUTPUT_LENGTH = 20_000
 
 
-# ---------------------------------------------------------
-# Potentially dangerous secrets
-# ---------------------------------------------------------
+# ============================================================
+# SECRET DETECTION
+# ============================================================
 
 SECRET_PATTERNS = [
-    # Generic API keys / tokens
+    # Explicit secret assignments:
+    # api_key=...
+    # api-key: ...
+    # secret_key=...
+    # access_token=...
     re.compile(
-        r"(?i)\b(api[_-]?key|secret[_-]?key|access[_-]?token)"
-        r"\s*[:=]\s*[A-Za-z0-9_\-./+=]{16,}"
+        r"(?i)\b"
+        r"(api[_-]?key|secret[_-]?key|access[_-]?token|"
+        r"auth[_-]?token|private[_-]?key|client[_-]?secret)"
+        r"\s*[:=]\s*"
+        r"[A-Za-z0-9_\-./+=]{12,}"
     ),
 
     # Bearer tokens
     re.compile(
-        r"(?i)\bbearer\s+[A-Za-z0-9_\-./+=]{20,}"
+        r"(?i)\bbearer\s+"
+        r"[A-Za-z0-9_\-./+=]{20,}"
     ),
 
     # OpenAI-style keys
     re.compile(
-        r"\bsk-[A-Za-z0-9]{20,}\b"
+        r"\bsk-[A-Za-z0-9_-]{16,}\b"
     ),
 
     # Google API keys
     re.compile(
-        r"\bAIza[A-Za-z0-9_\-]{20,}\b"
+        r"\bAIza[A-Za-z0-9_-]{20,}\b"
+    ),
+
+    # Generic token assignments
+    re.compile(
+        r"(?i)\b(token|password|passwd|pwd)"
+        r"\s*[:=]\s*"
+        r"[^\s]{12,}"
     ),
 ]
 
 
-# ---------------------------------------------------------
-# PII patterns
-# ---------------------------------------------------------
+# ============================================================
+# PII PATTERNS
+# ============================================================
 
 EMAIL_PATTERN = re.compile(
     r"\b[A-Za-z0-9._%+-]+@"
     r"[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
 )
+
 
 PHONE_PATTERN = re.compile(
     r"(?<!\d)"
@@ -53,22 +69,24 @@ PHONE_PATTERN = re.compile(
     r"(?!\d)"
 )
 
+
 AADHAAR_PATTERN = re.compile(
-    r"(?<!\d)\d{4}[\s-]?\d{4}[\s-]?\d{4}(?!\d)"
+    r"(?<!\d)"
+    r"\d{4}[\s-]?\d{4}[\s-]?\d{4}"
+    r"(?!\d)"
 )
 
 
-# ---------------------------------------------------------
-# Input validation
-# ---------------------------------------------------------
+# ============================================================
+# INPUT VALIDATION
+# ============================================================
 
 def validate_input(text: str) -> tuple[bool, str]:
     """
-    Validate incoming user input.
-
-    Returns:
-        (True, cleaned_text) when valid
-        (False, reason) when blocked
+    Validate user input BEFORE:
+    - PostgreSQL storage
+    - conversation memory
+    - LLM processing
     """
 
     if not isinstance(text, str):
@@ -80,32 +98,35 @@ def validate_input(text: str) -> tuple[bool, str]:
         return False, "Please enter a message."
 
     if len(text) > MAX_INPUT_LENGTH:
-        return (
-            False,
+        return False, (
             "Your message is too long. "
-            "Please keep it under 10,000 characters.",
+            "Please keep it under 10,000 characters."
         )
 
-    # Block obvious secret leakage.
+    # --------------------------------------------------------
+    # SECRET DETECTION
+    # --------------------------------------------------------
+
     for pattern in SECRET_PATTERNS:
         if pattern.search(text):
-            return (
-                False,
-                "For security, please don't send API keys, "
-                "passwords, access tokens, or other secrets here.",
+            return False, (
+                "🔐 For your security, please don't send "
+                "API keys, passwords, access tokens, or "
+                "other secrets to SAK AI.\n\n"
+                "I haven't processed or stored that message."
             )
 
     return True, text
 
 
-# ---------------------------------------------------------
-# PII scrubbing
-# ---------------------------------------------------------
+# ============================================================
+# PII SCRUBBING
+# ============================================================
 
 def scrub_pii(text: str) -> str:
     """
-    Replace common sensitive identifiers before sending
-    user content to an LLM.
+    Remove/redact sensitive personal information before
+    putting conversation content into the LLM context.
     """
 
     text = EMAIL_PATTERN.sub(
@@ -126,14 +147,13 @@ def scrub_pii(text: str) -> str:
     return text
 
 
-# ---------------------------------------------------------
-# Output validation
-# ---------------------------------------------------------
+# ============================================================
+# OUTPUT VALIDATION
+# ============================================================
 
 def validate_output(text: str) -> str:
     """
-    Validate and sanitize model output before returning it
-    to the user.
+    Sanitize model output before sending/storing it.
     """
 
     if not text:
@@ -147,12 +167,14 @@ def validate_output(text: str) -> str:
     if len(text) > MAX_OUTPUT_LENGTH:
         text = text[:MAX_OUTPUT_LENGTH].rstrip()
 
-    # Never allow obvious secrets generated accidentally
-    # by the model to be returned unchanged.
+    # Never allow secrets accidentally generated by the model
     for pattern in SECRET_PATTERNS:
         text = pattern.sub(
             "[SECRET_REDACTED]",
             text,
         )
+
+    # Also scrub PII from model output.
+    text = scrub_pii(text)
 
     return text
