@@ -48,4 +48,27 @@ def admin_keyboard():
             ],
         ],
         resize_keyboard=True,
+    )
+
+def manage_updates_keyboard(updates):
+    keyboard = []
+
+    for update in updates:
+        keyboard.append(
+            [
+                KeyboardButton(
+                    text=f"🗑️ Delete #{update.id}"
+                )
+            ]
+        )
+
+    keyboard.append(
+        [
+            KeyboardButton(text="🔙 Admin Panel")
+        ]
+    )
+
+    return ReplyKeyboardMarkup(
+        keyboard=keyboard,
+        resize_keyboard=True,
     )    

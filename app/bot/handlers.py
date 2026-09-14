@@ -1,3 +1,5 @@
+import html
+
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -9,6 +11,7 @@ from app.bot.keyboards import (
     admin_keyboard,
     category_keyboard,
     main_menu_keyboard,
+    manage_updates_keyboard,
 )
 
 from app.bot.states import (
@@ -19,9 +22,12 @@ from app.bot.states import (
 
 from app.database.database import AsyncSessionLocal
 from app.database.models import Update
+
 from app.database.repositories import (
     create_lead,
     create_user,
+    delete_update,
+    get_all_updates,
     get_published_updates,
     get_user,
 )
@@ -41,155 +47,6 @@ def is_admin(telegram_id: int) -> bool:
 
 
 # ============================================================
-# START / REGISTRATION
-# ============================================================
-
-@router.message(CommandStart())
-async def start_handler(
-    message: Message,
-    state: FSMContext,
-):
-    telegram_id = message.from_user.id
-
-    # /start always resets any active FSM flow
-    await state.clear()
-
-    async with AsyncSessionLocal() as session:
-        existing_user = await get_user(
-            session,
-            telegram_id,
-        )
-
-    if existing_user:
-        await message.answer(
-            f"Welcome back, {existing_user.name}! 👋\n\n"
-            "What would you like to do?",
-            reply_markup=main_menu_keyboard(),
-        )
-        return
-
-    await state.set_state(
-        RegistrationStates.waiting_for_name
-    )
-
-    await message.answer(
-        "👋 Welcome to SAK AI!\n\n"
-        "SAK AI builds AI solutions, intelligent automations, "
-        "and AI agents to help you work smarter and automate tasks.\n\n"
-        "Let's get to know you first.\n\n"
-        "What is your name?"
-    )
-
-
-@router.message(RegistrationStates.waiting_for_name)
-async def name_handler(
-    message: Message,
-    state: FSMContext,
-):
-    name = (message.text or "").strip()
-
-    if len(name) < 2:
-        await message.answer(
-            "Please enter a valid name."
-        )
-        return
-
-    await state.update_data(
-        name=name
-    )
-
-    await state.set_state(
-        RegistrationStates.waiting_for_age
-    )
-
-    await message.answer(
-        "Nice to meet you! 👋\n\n"
-        "How old are you?"
-    )
-
-
-@router.message(RegistrationStates.waiting_for_age)
-async def age_handler(
-    message: Message,
-    state: FSMContext,
-):
-    try:
-        age = int((message.text or "").strip())
-    except ValueError:
-        await message.answer(
-            "Please enter your age as a number.\n\n"
-            "Example: 21"
-        )
-        return
-
-    if age < 5 or age > 120:
-        await message.answer(
-            "Please enter a valid age."
-        )
-        return
-
-    await state.update_data(
-        age=age
-    )
-
-    await state.set_state(
-        RegistrationStates.waiting_for_category
-    )
-
-    await message.answer(
-        "Which category describes you best?",
-        reply_markup=category_keyboard(),
-    )
-
-
-@router.message(RegistrationStates.waiting_for_category)
-async def category_handler(
-    message: Message,
-    state: FSMContext,
-):
-    category = (message.text or "").strip()
-
-    allowed_categories = {
-        "🎓 Student",
-        "💼 Working Professional",
-        "🏢 Business Owner",
-        "🧑‍💻 Freelancer",
-        "🔹 Other",
-    }
-
-    if category not in allowed_categories:
-        await message.answer(
-            "Please select one of the options.",
-            reply_markup=category_keyboard(),
-        )
-        return
-
-    data = await state.get_data()
-
-    telegram_id = message.from_user.id
-    username = message.from_user.username
-
-    async with AsyncSessionLocal() as session:
-        user = await create_user(
-            session=session,
-            telegram_id=telegram_id,
-            username=username,
-            name=data["name"],
-            age=data["age"],
-            category=category,
-        )
-
-    await state.clear()
-
-    await message.answer(
-        f"Registration complete, {user.name}! ✅\n\n"
-        "Welcome to SAK AI.\n\n"
-        "How can we help you?",
-        reply_markup=main_menu_keyboard(),
-    )
-
-
-# ============================================================
 # ADMIN PANEL
 # ============================================================
 
@@ -203,9 +60,7 @@ async def admin_panel_handler(
 ):
     await state.clear()
 
-    telegram_id = message.from_user.id
-
-    if not is_admin(telegram_id):
+    if not is_admin(message.from_user.id):
         await message.answer(
             "⛔ You are not authorized to access the admin panel.",
             reply_markup=main_menu_keyboard(),
@@ -233,9 +88,7 @@ async def admin_add_update_handler(
     message: Message,
     state: FSMContext,
 ):
-    telegram_id = message.from_user.id
-
-    if not is_admin(telegram_id):
+    if not is_admin(message.from_user.id):
         await state.clear()
 
         await message.answer(
@@ -335,7 +188,6 @@ async def admin_update_content_handler(
         return
 
     data = await state.get_data()
-
     title = data.get("update_title")
 
     if not title:
@@ -361,11 +213,155 @@ async def admin_update_content_handler(
 
     await state.clear()
 
+    safe_title = html.escape(update.title)
+    safe_content = html.escape(update.content)
+
     await message.answer(
         "✅ <b>Update published successfully!</b>\n\n"
-        f"🚀 <b>{update.title}</b>\n\n"
-        f"{update.content}\n\n"
+        f"🚀 <b>{safe_title}</b>\n\n"
+        f"{safe_content}\n\n"
         f"Update ID: #{update.id}",
+        parse_mode="HTML",
+        reply_markup=admin_keyboard(),
+    )
+
+
+# ============================================================
+# ADMIN — MANAGE UPDATES
+# ============================================================
+
+@router.message(
+    StateFilter("*"),
+    F.text == "📋 Manage Updates",
+)
+async def admin_manage_updates_handler(
+    message: Message,
+    state: FSMContext,
+):
+    if not is_admin(message.from_user.id):
+        await state.clear()
+
+        await message.answer(
+            "⛔ You are not authorized to access the admin panel.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    await state.clear()
+
+    async with AsyncSessionLocal() as session:
+        updates = await get_all_updates(session, limit=10)
+
+    if not updates:
+        await message.answer(
+            "📋 <b>Manage Updates</b>\n\n"
+            "There are no updates yet.",
+            parse_mode="HTML",
+            reply_markup=admin_keyboard(),
+        )
+        return
+
+    response = "📋 <b>Manage Updates</b>\n\n"
+
+    for update in updates:
+        safe_title = html.escape(update.title)
+        safe_content = html.escape(update.content)
+
+        # Keep the management message compact.
+        if len(safe_content) > 300:
+            safe_content = safe_content[:300] + "..."
+
+        response += (
+            f"🆔 <b>#{update.id}</b>\n"
+            f"🚀 <b>{safe_title}</b>\n"
+            f"{safe_content}\n\n"
+            "━━━━━━━━━━━━━━\n\n"
+        )
+
+    await message.answer(
+        response,
+        parse_mode="HTML",
+        reply_markup=manage_updates_keyboard(updates),
+    )
+
+
+# ============================================================
+# ADMIN — DELETE UPDATE
+# ============================================================
+
+@router.message(
+    StateFilter("*"),
+    F.text.startswith("🗑️ Delete #"),
+)
+async def admin_delete_update_handler(
+    message: Message,
+    state: FSMContext,
+):
+    if not is_admin(message.from_user.id):
+        await state.clear()
+
+        await message.answer(
+            "⛔ You are not authorized.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    try:
+        update_id = int(
+            message.text.split("#")[-1].strip()
+        )
+    except (ValueError, AttributeError):
+        await message.answer(
+            "❌ Invalid update ID.",
+            reply_markup=admin_keyboard(),
+        )
+        return
+
+    async with AsyncSessionLocal() as session:
+        deleted = await delete_update(
+            session,
+            update_id,
+        )
+
+    if not deleted:
+        await message.answer(
+            f"❌ Update #{update_id} was not found.",
+            reply_markup=admin_keyboard(),
+        )
+        return
+
+    await message.answer(
+        f"🗑️ <b>Update #{update_id} deleted successfully.</b>",
+        parse_mode="HTML",
+        reply_markup=admin_keyboard(),
+    )
+
+
+# ============================================================
+# ADMIN — BACK TO ADMIN PANEL
+# ============================================================
+
+@router.message(
+    StateFilter("*"),
+    F.text == "🔙 Admin Panel",
+)
+async def back_to_admin_panel_handler(
+    message: Message,
+    state: FSMContext,
+):
+    await state.clear()
+
+    if not is_admin(message.from_user.id):
+        await message.answer(
+            "⛔ You are not authorized.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    await message.answer(
+        "🔐 <b>SAK AI Admin Panel</b>\n\n"
+        "Welcome, Admin.\n\n"
+        "Choose an action:",
         parse_mode="HTML",
         reply_markup=admin_keyboard(),
     )
@@ -384,6 +380,13 @@ async def admin_main_menu_handler(
     state: FSMContext,
 ):
     await state.clear()
+
+    if is_admin(message.from_user.id):
+        await message.answer(
+            "🏠 Main Menu",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
 
     await message.answer(
         "🏠 Main Menu",
@@ -469,7 +472,8 @@ async def updates_handler(
 
     async with AsyncSessionLocal() as session:
         updates = await get_published_updates(
-            session
+            session,
+            limit=5,
         )
 
     if not updates:
@@ -485,9 +489,12 @@ async def updates_handler(
     response = "📢 <b>SAK AI Updates</b>\n\n"
 
     for update in updates:
+        safe_title = html.escape(update.title)
+        safe_content = html.escape(update.content)
+
         response += (
-            f"🚀 <b>{update.title}</b>\n"
-            f"{update.content}\n\n"
+            f"🚀 <b>{safe_title}</b>\n"
+            f"{safe_content}\n\n"
             "━━━━━━━━━━━━━━\n\n"
         )
 
@@ -518,6 +525,172 @@ async def ask_sak_ai_handler(
         "You'll be able to ask questions, get information, "
         "and interact with intelligent AI agents.",
         parse_mode="HTML",
+        reply_markup=main_menu_keyboard(),
+    )
+
+
+# ============================================================
+# START / REGISTRATION
+# ============================================================
+
+@router.message(CommandStart())
+async def start_handler(
+    message: Message,
+    state: FSMContext,
+):
+    telegram_id = message.from_user.id
+
+    await state.clear()
+
+    async with AsyncSessionLocal() as session:
+        existing_user = await get_user(
+            session,
+            telegram_id,
+        )
+
+    if existing_user:
+        await message.answer(
+            f"Welcome back, {existing_user.name}! 👋\n\n"
+            "What would you like to do?",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    await state.set_state(
+        RegistrationStates.waiting_for_name
+    )
+
+    await message.answer(
+        "👋 Welcome to SAK AI!\n\n"
+        "SAK AI builds AI solutions, intelligent automations, "
+        "and AI agents to help you work smarter and automate tasks.\n\n"
+        "Let's get to know you first.\n\n"
+        "What is your name?"
+    )
+
+
+# ============================================================
+# REGISTRATION — NAME
+# ============================================================
+
+@router.message(
+    RegistrationStates.waiting_for_name
+)
+async def name_handler(
+    message: Message,
+    state: FSMContext,
+):
+    name = (message.text or "").strip()
+
+    if len(name) < 2:
+        await message.answer(
+            "Please enter a valid name."
+        )
+        return
+
+    await state.update_data(
+        name=name
+    )
+
+    await state.set_state(
+        RegistrationStates.waiting_for_age
+    )
+
+    await message.answer(
+        "Nice to meet you! 👋\n\n"
+        "How old are you?"
+    )
+
+
+# ============================================================
+# REGISTRATION — AGE
+# ============================================================
+
+@router.message(
+    RegistrationStates.waiting_for_age
+)
+async def age_handler(
+    message: Message,
+    state: FSMContext,
+):
+    try:
+        age = int((message.text or "").strip())
+    except ValueError:
+        await message.answer(
+            "Please enter your age as a number.\n\n"
+            "Example: 21"
+        )
+        return
+
+    if age < 5 or age > 120:
+        await message.answer(
+            "Please enter a valid age."
+        )
+        return
+
+    await state.update_data(
+        age=age
+    )
+
+    await state.set_state(
+        RegistrationStates.waiting_for_category
+    )
+
+    await message.answer(
+        "Which category describes you best?",
+        reply_markup=category_keyboard(),
+    )
+
+
+# ============================================================
+# REGISTRATION — CATEGORY
+# ============================================================
+
+@router.message(
+    RegistrationStates.waiting_for_category
+)
+async def category_handler(
+    message: Message,
+    state: FSMContext,
+):
+    category = (message.text or "").strip()
+
+    allowed_categories = {
+        "🎓 Student",
+        "💼 Working Professional",
+        "🏢 Business Owner",
+        "🧑‍💻 Freelancer",
+        "🔹 Other",
+    }
+
+    if category not in allowed_categories:
+        await message.answer(
+            "Please select one of the options.",
+            reply_markup=category_keyboard(),
+        )
+        return
+
+    data = await state.get_data()
+
+    telegram_id = message.from_user.id
+    username = message.from_user.username
+
+    async with AsyncSessionLocal() as session:
+        user = await create_user(
+            session=session,
+            telegram_id=telegram_id,
+            username=username,
+            name=data["name"],
+            age=data["age"],
+            category=category,
+        )
+
+    await state.clear()
+
+    await message.answer(
+        f"Registration complete, {user.name}! ✅\n\n"
+        "Welcome to SAK AI.\n\n"
+        "How can we help you?",
         reply_markup=main_menu_keyboard(),
     )
 
@@ -606,13 +779,6 @@ async def contact_requirement_handler(
     state: FSMContext,
 ):
     requirement = (message.text or "").strip()
-
-    print(
-        f"🧪 REQUIREMENT DEBUG: "
-        f"text={message.text!r}, "
-        f"length={len(requirement)}, "
-        f"state={await state.get_state()}"
-    )
 
     if len(requirement) < 5:
         await message.answer(

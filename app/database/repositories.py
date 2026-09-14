@@ -68,3 +68,25 @@ async def get_published_updates(session, limit: int = 5):
 
     return result.scalars().all()
 
+async def get_all_updates(session, limit: int = 20):
+    result = await session.execute(
+        select(Update)
+        .order_by(Update.created_at.desc())
+        .limit(limit)
+    )
+    return result.scalars().all()
+
+
+async def delete_update(session, update_id: int):
+    result = await session.execute(
+        select(Update).where(Update.id == update_id)
+    )
+    update = result.scalar_one_or_none()
+
+    if update is None:
+        return False
+
+    await session.delete(update)
+    await session.commit()
+
+    return True
