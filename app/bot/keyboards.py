@@ -1,7 +1,7 @@
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
 
-def category_keyboard():
+def category_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [
@@ -21,7 +21,7 @@ def category_keyboard():
     )
 
 
-def main_menu_keyboard():
+def main_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [
@@ -36,7 +36,8 @@ def main_menu_keyboard():
         resize_keyboard=True,
     )
 
-def admin_keyboard():
+
+def admin_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [
@@ -50,7 +51,8 @@ def admin_keyboard():
         resize_keyboard=True,
     )
 
-def manage_updates_keyboard(updates):
+
+def manage_updates_keyboard(updates) -> ReplyKeyboardMarkup:
     keyboard = []
 
     for update in updates:
@@ -71,4 +73,4 @@ def manage_updates_keyboard(updates):
     return ReplyKeyboardMarkup(
         keyboard=keyboard,
         resize_keyboard=True,
-    )    
+    )

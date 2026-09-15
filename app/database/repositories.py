@@ -1,11 +1,25 @@
 from sqlalchemy import select
 
-from app.database.models import User , Lead , Update, Conversation, Message
+from app.database.models import (
+    Conversation,
+    Lead,
+    Message,
+    Update,
+    User,
+)
 
 
-async def get_user(session, telegram_id: int):
+# ============================================================
+# USER
+# ============================================================
+
+async def get_user(
+    session,
+    telegram_id: int,
+):
     result = await session.execute(
-        select(User).where(User.telegram_id == telegram_id)
+        select(User)
+        .where(User.telegram_id == telegram_id)
     )
 
     return result.scalar_one_or_none()
@@ -35,6 +49,10 @@ async def create_user(
     return user
 
 
+# ============================================================
+# LEADS
+# ============================================================
+
 async def create_lead(
     session,
     telegram_id: int,
@@ -56,9 +74,17 @@ async def create_lead(
     await session.commit()
     await session.refresh(lead)
 
-    return lead    
+    return lead
 
-async def get_published_updates(session, limit: int = 5):
+
+# ============================================================
+# UPDATES
+# ============================================================
+
+async def get_published_updates(
+    session,
+    limit: int = 5,
+):
     result = await session.execute(
         select(Update)
         .where(Update.is_published.is_(True))
@@ -68,19 +94,29 @@ async def get_published_updates(session, limit: int = 5):
 
     return result.scalars().all()
 
-async def get_all_updates(session, limit: int = 20):
+
+async def get_all_updates(
+    session,
+    limit: int = 20,
+):
     result = await session.execute(
         select(Update)
         .order_by(Update.created_at.desc())
         .limit(limit)
     )
+
     return result.scalars().all()
 
 
-async def delete_update(session, update_id: int):
+async def delete_update(
+    session,
+    update_id: int,
+):
     result = await session.execute(
-        select(Update).where(Update.id == update_id)
+        select(Update)
+        .where(Update.id == update_id)
     )
+
     update = result.scalar_one_or_none()
 
     if update is None:
@@ -91,6 +127,10 @@ async def delete_update(session, update_id: int):
 
     return True
 
+
+# ============================================================
+# CONVERSATIONS / MEMORY
+# ============================================================
 
 async def get_or_create_conversation(
     session,
@@ -114,6 +154,7 @@ async def get_or_create_conversation(
     )
 
     session.add(conversation)
+
     await session.commit()
     await session.refresh(conversation)
 
@@ -135,6 +176,7 @@ async def create_message(
     )
 
     session.add(message)
+
     await session.commit()
     await session.refresh(message)
 

@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from aiogram import Bot, Dispatcher
 from aiogram.types import Update
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 
 from app.ai.http_client import create_http_client
 from app.ai.router import LLMRouter
@@ -16,7 +16,7 @@ from app.database.database import init_db
 # ============================================================
 
 bot = Bot(
-    token=settings.telegram_bot_token
+    token=settings.telegram_bot_token,
 )
 
 dp = Dispatcher()
@@ -30,7 +30,6 @@ dp.include_router(router)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-
     print("🚀 Starting SAK AI...")
 
     # --------------------------------------------------------
@@ -40,16 +39,14 @@ async def lifespan(app: FastAPI):
     try:
         await init_db()
 
-        print(
-            "✅ Database initialized successfully!"
-        )
+        print("✅ Database initialized successfully!")
 
     except Exception as error:
-
         print(
             "❌ Database initialization failed: "
             f"{type(error).__name__}: {error}"
         )
+        raise
 
     # --------------------------------------------------------
     # AI HTTP CLIENT + LLM ROUTER
@@ -58,39 +55,24 @@ async def lifespan(app: FastAPI):
     http_client = create_http_client()
 
     llm_router = LLMRouter(
-        http_client
+        http_client,
     )
 
-    # IMPORTANT:
-    # Make the LLM router available to handlers.py.
-    #
-    # ai_chat_handler() does NOT receive llm_router
-    # as an aiogram dependency.
-    #
-    # Instead it accesses:
-    #
-    # router.llm_router
-    #
+    # Make LLM router available to handlers.py
     router.llm_router = llm_router
 
-    # Also expose them through FastAPI application state.
+    # Expose through FastAPI application state
     app.state.http_client = http_client
     app.state.llm_router = llm_router
 
-    print(
-        "✅ AI HTTP client initialized"
-    )
-
-    print(
-        "✅ LLM router initialized"
-    )
+    print("✅ AI HTTP client initialized")
+    print("✅ LLM router initialized")
 
     # --------------------------------------------------------
     # TELEGRAM WEBHOOK
     # --------------------------------------------------------
 
     try:
-
         base_url = (
             settings.webhook_base_url
             .strip()
@@ -98,38 +80,26 @@ async def lifespan(app: FastAPI):
         )
 
         if not base_url:
-
             print(
                 "❌ WEBHOOK_BASE_URL is empty "
                 "or not configured."
             )
 
         else:
-
             webhook_url = (
                 f"{base_url}/telegram/webhook"
             )
 
-            print(
-                "🔧 Setting Telegram webhook..."
-            )
-
-            print(
-                f"🔗 Webhook URL: {webhook_url}"
-            )
+            print("🔧 Setting Telegram webhook...")
+            print(f"🔗 Webhook URL: {webhook_url}")
 
             await bot.set_webhook(
                 url=webhook_url,
+                secret_token=settings.telegram_webhook_secret,
                 drop_pending_updates=True,
             )
 
-            # ------------------------------------------------
-            # VERIFY WEBHOOK
-            # ------------------------------------------------
-
-            webhook_info = (
-                await bot.get_webhook_info()
-            )
+            webhook_info = await bot.get_webhook_info()
 
             print(
                 "✅ Telegram webhook configured "
@@ -147,14 +117,12 @@ async def lifespan(app: FastAPI):
             )
 
             if webhook_info.last_error_message:
-
                 print(
                     "⚠️ Telegram webhook last error: "
                     f"{webhook_info.last_error_message}"
                 )
 
     except Exception as error:
-
         print(
             "❌ Failed to configure Telegram "
             "webhook: "
@@ -165,13 +133,7 @@ async def lifespan(app: FastAPI):
     # STARTUP COMPLETE
     # --------------------------------------------------------
 
-    print(
-        "✅ SAK AI startup complete!"
-    )
-
-    # --------------------------------------------------------
-    # APPLICATION RUNNING
-    # --------------------------------------------------------
+    print("✅ SAK AI startup complete!")
 
     yield
 
@@ -179,24 +141,18 @@ async def lifespan(app: FastAPI):
     # SHUTDOWN
     # ========================================================
 
-    print(
-        "🛑 Shutting down SAK AI..."
-    )
+    print("🛑 Shutting down SAK AI...")
 
     # --------------------------------------------------------
     # CLOSE AI HTTP CLIENT
     # --------------------------------------------------------
 
     try:
-
         await http_client.aclose()
 
-        print(
-            "✅ AI HTTP client closed"
-        )
+        print("✅ AI HTTP client closed")
 
     except Exception as error:
-
         print(
             "⚠️ Failed to close AI HTTP client: "
             f"{type(error).__name__}: {error}"
@@ -207,34 +163,19 @@ async def lifespan(app: FastAPI):
     # --------------------------------------------------------
 
     try:
-
-        # IMPORTANT:
-        #
         # Do NOT delete the Telegram webhook here.
-        #
-        # Render can restart/redeploy the service.
-        # Deleting the webhook during shutdown can cause
-        # Telegram updates to stop being delivered.
-        #
-        # We only close the bot HTTP session.
-
         await bot.session.close()
 
-        print(
-            "✅ Telegram bot session closed"
-        )
+        print("✅ Telegram bot session closed")
 
     except Exception as error:
-
         print(
             "⚠️ Failed to close Telegram bot "
             "session: "
             f"{type(error).__name__}: {error}"
         )
 
-    print(
-        "✅ SAK AI shutdown complete."
-    )
+    print("✅ SAK AI shutdown complete.")
 
 
 # ============================================================
@@ -254,7 +195,6 @@ app = FastAPI(
 
 @app.get("/")
 async def root():
-
     return {
         "service": "SAK AI",
         "status": "running",
@@ -267,7 +207,6 @@ async def root():
 
 @app.get("/health")
 async def health():
-
     return {
         "status": "healthy",
         "service": "SAK AI",
@@ -281,26 +220,40 @@ async def health():
 @app.post("/telegram/webhook")
 async def telegram_webhook(
     request: Request,
+    x_telegram_bot_api_secret_token: str | None = Header(
+        default=None,
+    ),
 ):
+    # --------------------------------------------------------
+    # VERIFY TELEGRAM WEBHOOK SECRET
+    # --------------------------------------------------------
+
+    if (
+        x_telegram_bot_api_secret_token
+        != settings.telegram_webhook_secret
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid webhook authentication",
+        )
 
     try:
-
         # ----------------------------------------------------
-        # Read Telegram update JSON
+        # READ TELEGRAM UPDATE
         # ----------------------------------------------------
 
         update_data = await request.json()
 
         # ----------------------------------------------------
-        # Convert JSON into aiogram Update
+        # CONVERT JSON TO AIOGRAM UPDATE
         # ----------------------------------------------------
 
         update = Update.model_validate(
-            update_data
+            update_data,
         )
 
         # ----------------------------------------------------
-        # Send update to aiogram dispatcher
+        # PROCESS UPDATE
         # ----------------------------------------------------
 
         await dp.feed_update(
@@ -313,13 +266,12 @@ async def telegram_webhook(
         }
 
     except Exception as error:
-
         print(
             "❌ Telegram webhook processing error: "
             f"{type(error).__name__}: {error}"
         )
 
-        return {
-            "ok": False,
-            "error": str(error),
-        }
+        raise HTTPException(
+            status_code=500,
+            detail="Webhook processing failed",
+        ) from error
